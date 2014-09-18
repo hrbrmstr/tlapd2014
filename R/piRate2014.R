@@ -18,6 +18,8 @@ library(gtable)
 library(gridExtra)
 library(reshape2)
 library(scales)
+library(biOps) # https://code.google.com/p/rimagebook/wiki/biOpsInstallationEn
+library(raster)
 
 # You should do a quick walk through of the accompanying blog post:
 # - http://datadrivensecurity.info/blog/2014/09/19/do-you-want-to-steal-a-snowman.html
@@ -114,7 +116,7 @@ cleanUpMovieData <- function(imdb) {
 
 getOMDBInfo <- function(imdb.ids) {
 
-  Reduce(rbind, pblapply(unique(imdb.ids), function(imdb.id) {
+  do.call("rbind", pblapply(unique(imdb.ids), function(imdb.id) {
 
     dat <- GET(sprintf("http://www.omdbapi.com/?i=%s&tomatoes=TRUE", imdb.id))
     data.frame(fromJSON(content(dat, as="text")), stringsAsFactors=FALSE)
@@ -480,3 +482,36 @@ gg <- gg + theme(axis.ticks.x=element_blank())
 gg <- gg + theme(axis.text.x=element_blank())
 gg <- gg + theme(legend.position="top")
 gg
+
+
+# 13. poster histograms
+
+# get all the #1 hits & sort them by box office receipts
+number_one <- combined %>% group_by(Title) %>% filter(rank==1, rating==max(rating)) %>% select(Title, short.title, imdb.id, rank, rating, BoxOffice) %>% ungroup %>% unique
+number_one <- number_one[complete.cases(number_one),] %>% arrange(desc(BoxOffice))
+
+# read in all their poster images
+posters <- sapply(number_one$imdb.id, function(x) readJpeg(sprintf("data/posters/%s.jpg", x)))
+
+# calculate the max bin count so we can normalize the histograms across RGB plots & movies
+hist_max <- max(sapply(number_one$imdb.id, function(x) {
+  max(hist(posters[[x]][,,1], plot=FALSE, breaks=seq(from=0, to=260, by=10))$counts,
+      hist(posters[[x]][,,2], plot=FALSE, breaks=seq(from=0, to=260, by=10))$counts,
+      hist(posters[[x]][,,3], plot=FALSE, breaks=seq(from=0, to=260, by=10))$counts)
+}))
+
+# plot the histograms with the poster, labeling with short title and $
+n<-nrow(dat)
+png("data/posters/histograms.png", width=3600, height=1800)
+plot.new()
+par(mar=rep(2, 4))
+par(mfrow=c(n/3, 12))
+for (i in 1:12) {
+  for (j in 1:3) {
+    plot(posters[[i*j]])
+    hist(posters[[i*j]][,,1], col="red", xlab = "", ylab = "", main="", breaks=seq(from=0, to=260, by=10), ylim=c(0,hist_max))
+    hist(posters[[i*j]][,,2], col="green", xlab = "", ylab = "", main=sprintf("%s - %s", dat[i*j,]$short.title, dollar(dat[i*j,]$BoxOffice)), breaks=seq(from=0, to=260, by=10), ylim=c(0,hist_max))
+    hist(posters[[i*j]][,,3], col="blue", xlab = "", ylab = "", main="", breaks=seq(from=0, to=260, by=10), ylim=c(0,hist_max))
+  }
+}
+dev.off()
